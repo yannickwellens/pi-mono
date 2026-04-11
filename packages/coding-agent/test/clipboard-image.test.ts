@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => {
 			hasImage: vi.fn<() => boolean>(),
 			getImageBinary: vi.fn<() => Promise<Uint8Array | null>>(),
 		},
+		fs: {
+			readFileSync: vi.fn<(path: string, encoding?: BufferEncoding) => string | Buffer>(),
+			unlinkSync: vi.fn<(path: string) => void>(),
+		},
 	};
 });
 
@@ -20,6 +24,13 @@ vi.mock("child_process", () => {
 vi.mock("../src/utils/clipboard-native.js", () => {
 	return {
 		clipboard: mocks.clipboard,
+	};
+});
+
+vi.mock("fs", () => {
+	return {
+		readFileSync: mocks.fs.readFileSync,
+		unlinkSync: mocks.fs.unlinkSync,
 	};
 });
 
@@ -52,6 +63,8 @@ describe("readClipboardImage", () => {
 		mocks.spawnSync.mockReset();
 		mocks.clipboard.hasImage.mockReset();
 		mocks.clipboard.getImageBinary.mockReset();
+		mocks.fs.readFileSync.mockReset();
+		mocks.fs.unlinkSync.mockReset();
 	});
 
 	test("Wayland: uses wl-paste and never calls clipboard", async () => {
@@ -132,5 +145,48 @@ describe("readClipboardImage", () => {
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.js");
 		const result = await readClipboardImage({ platform: "linux", env: {} });
 		expect(result).toBeNull();
+	});
+
+	test("WSL: PowerShell fallback inlines escaped Windows path", async () => {
+		const enoent = new Error("spawn ENOENT");
+		(enoent as { code?: string }).code = "ENOENT";
+		let powershellScript = "";
+		let powershellEnv: NodeJS.ProcessEnv | undefined;
+
+		mocks.fs.readFileSync.mockImplementation((path, encoding) => {
+			if (encoding === "utf-8") {
+				throw new Error(`Unexpected utf-8 readFileSync call: ${path}`);
+			}
+			return Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+		});
+		mocks.fs.unlinkSync.mockImplementation(() => {});
+
+		mocks.spawnSync.mockImplementation((command, args, options) => {
+			if (command === "wl-paste" || command === "xclip") {
+				return spawnError(enoent);
+			}
+
+			if (command === "wslpath") {
+				return spawnOk(Buffer.from("C:\\Users\\O'Brien\\AppData\\Local\\Temp\\pi.png\n", "utf-8"));
+			}
+
+			if (command === "powershell.exe") {
+				powershellScript = args[2] ?? "";
+				powershellEnv = (options as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+				return spawnOk(Buffer.from("ok\n", "utf-8"));
+			}
+
+			throw new Error(`Unexpected spawnSync call: ${command} ${args.join(" ")}`);
+		});
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.js");
+		const result = await readClipboardImage({ platform: "linux", env: { WSL_DISTRO_NAME: "Ubuntu" } });
+
+		expect(result).not.toBeNull();
+		expect(result?.mimeType).toBe("image/png");
+		expect(Array.from(result?.bytes ?? [])).toEqual([0x89, 0x50, 0x4e, 0x47]);
+		expect(powershellScript).toContain("$path = 'C:\\Users\\O''Brien\\AppData\\Local\\Temp\\pi.png'");
+		expect(powershellScript).not.toContain("PI_WSL_CLIPBOARD_IMAGE_PATH");
+		expect(powershellEnv?.PI_WSL_CLIPBOARD_IMAGE_PATH).toBeUndefined();
 	});
 });
