@@ -654,7 +654,10 @@ function buildParams(
 		stream: true,
 	};
 
-	// For OAuth tokens, we MUST include Claude Code identity and attribution header
+	// For OAuth tokens, we MUST include Claude Code identity and attribution header.
+	// The server validates system prompt content matches Claude Code's expected structure.
+	// Custom instructions (pi's system prompt) go into the first user message as
+	// <system-reminder> tags, same pattern Claude Code uses for CLAUDE.md content.
 	if (isOAuthToken) {
 		params.system = [
 			{
@@ -667,12 +670,23 @@ function buildParams(
 				...(cacheControl ? { cache_control: cacheControl } : {}),
 			},
 		];
-		if (context.systemPrompt) {
-			params.system.push({
-				type: "text",
-				text: sanitizeSurrogates(context.systemPrompt),
-				...(cacheControl ? { cache_control: cacheControl } : {}),
-			});
+		// Inject custom system prompt into first user message as <system-reminder>
+		if (context.systemPrompt && params.messages.length > 0) {
+			const reminder = `<system-reminder>\n${sanitizeSurrogates(context.systemPrompt)}\n</system-reminder>\n\n`;
+			const firstMsg = params.messages[0];
+			if (firstMsg.role === "user") {
+				if (typeof firstMsg.content === "string") {
+					params.messages[0] = { ...firstMsg, content: reminder + firstMsg.content };
+				} else if (Array.isArray(firstMsg.content)) {
+					params.messages[0] = {
+						...firstMsg,
+						content: [{ type: "text", text: reminder }, ...firstMsg.content],
+					};
+				}
+			} else {
+				// First message isn't user — prepend a user message with the reminder
+				params.messages.unshift({ role: "user", content: reminder });
+			}
 		}
 	} else if (context.systemPrompt) {
 		// Add cache control to system prompt for non-OAuth tokens

@@ -28,6 +28,9 @@
 		"examples",
 		"CHANGELOG.md"
 	],
+	"bundleDependencies": [
+		"@mariozechner/pi-ai"
+	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
