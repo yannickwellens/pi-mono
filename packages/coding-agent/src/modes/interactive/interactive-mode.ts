@@ -317,7 +317,7 @@ export class InteractiveMode {
 			return scopePrefix;
 		}
 
-		if (source.startsWith("npm:")) {
+		if (source.startsWith("npm:") || source.startsWith("local:")) {
 			return `${scopePrefix}:${source}`;
 		}
 
@@ -819,6 +819,11 @@ export class InteractiveMode {
 			return gitMatch[1];
 		}
 
+		const localMatch = fullPath.match(/local\/[0-9a-f]+\/node_modules\/(@?[^/]+(?:\/[^/]+)?)\/(.*)/);
+		if (localMatch && source.startsWith("local:")) {
+			return localMatch[2];
+		}
+
 		return this.formatDisplayPath(fullPath);
 	}
 
@@ -862,7 +867,7 @@ export class InteractiveMode {
 
 	private isPackageSource(sourceInfo?: SourceInfo): boolean {
 		const source = sourceInfo?.source ?? "";
-		return source.startsWith("npm:") || source.startsWith("git:");
+		return source.startsWith("npm:") || source.startsWith("git:") || source.startsWith("local:");
 	}
 
 	private buildScopeGroups(items: Array<{ path: string; sourceInfo?: SourceInfo }>): Array<{

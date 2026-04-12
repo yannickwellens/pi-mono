@@ -9,6 +9,7 @@
 
 ### Added
 
+- Added `local:` package sources for npm-style installs from local tarballs or package directories, so `pi install local:./path/to/package.tgz` installs into pi-managed package directories.
 - Set `PI_CODING_AGENT=true` environment variable at startup so sub-processes can detect they are running inside the coding agent ([#2868](https://github.com/badlogic/pi-mono/issues/2868))
 
 ## [0.66.1] - 2026-04-08

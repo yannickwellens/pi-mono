@@ -532,6 +532,7 @@ Content`,
 			expect((packageManager as any).parseSource("https://github.com/user/repo@v1").type).toBe("git");
 			expect((packageManager as any).parseSource("git:git@github.com:user/repo@v1").type).toBe("git");
 			expect((packageManager as any).parseSource("ssh://git@github.com/user/repo@v1").type).toBe("git");
+			expect((packageManager as any).parseSource("local:./dist/my-package-1.0.0.tgz").type).toBe("local-package");
 
 			expect((packageManager as any).parseSource("/absolute/path/to/package").type).toBe("local");
 			expect((packageManager as any).parseSource("./relative/path/to/package").type).toBe("local");
@@ -576,6 +577,18 @@ Content`,
 			const rel = relative(join(tempDir, ".pi"), projectPkgDir);
 			const expected = rel.startsWith(".") ? rel : `./${rel}`;
 			expect(settings.packages?.[0]).toBe(expected);
+		});
+
+		it("should store local package sources relative to the target settings base", () => {
+			const packedPkgDir = join(tempDir, "dist", "packed-pkg");
+			mkdirSync(packedPkgDir, { recursive: true });
+
+			const added = packageManager.addSourceToSettings("local:./dist/packed-pkg");
+			expect(added).toBe(true);
+
+			const settings = settingsManager.getGlobalSettings();
+			const rel = relative(agentDir, packedPkgDir);
+			expect(settings.packages?.[0]).toBe(`local:${rel}`);
 		});
 
 		it("should remove local package entries using equivalent path forms", () => {
@@ -1338,6 +1351,31 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			// Should only find the valid top-level extension
 			expect(result.extensions.some((r) => pathEndsWith(r.path, "valid.ts") && r.enabled)).toBe(true);
 			expect(result.extensions.filter((r) => r.enabled).length).toBe(1);
+		});
+	});
+
+	describe("local package installs", () => {
+		it("should install local package sources into managed local package dirs", async () => {
+			const localPkgDir = join(tempDir, "dist", "packed-pkg");
+			mkdirSync(localPkgDir, { recursive: true });
+			writeFileSync(
+				join(localPkgDir, "package.json"),
+				JSON.stringify({ name: "packed-pkg", version: "1.0.0", pi: { extensions: ["./extensions"] } }),
+			);
+			mkdirSync(join(localPkgDir, "extensions"), { recursive: true });
+			writeFileSync(join(localPkgDir, "extensions", "index.ts"), "export default function() {}");
+
+			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
+
+			await packageManager.install("local:./dist/packed-pkg", { local: true });
+
+			expect(runCommandSpy).toHaveBeenCalledTimes(1);
+			const [command, args] = runCommandSpy.mock.calls[0] as [string, string[]];
+			expect(command).toBe("npm");
+			expect(args[0]).toBe("install");
+			expect(args[1]).toBe(localPkgDir);
+			expect(args[2]).toBe("--prefix");
+			expect(normalizeForMatch(args[3] as string)).toContain(normalizeForMatch(join(tempDir, ".pi", "local")));
 		});
 	});
 

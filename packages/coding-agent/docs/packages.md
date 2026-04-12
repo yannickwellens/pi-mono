@@ -23,6 +23,7 @@ Pi packages bundle extensions, skills, prompt templates, and themes so you can s
 pi install npm:@foo/bar@1.0.0
 pi install git:github.com/user/repo@v1
 pi install https://github.com/user/repo  # raw URLs work too
+pi install local:./dist/my-package-1.0.0.tgz
 pi install /absolute/path/to/package
 pi install ./relative/path/to/package
 
@@ -42,7 +43,7 @@ pi -e git:github.com/user/repo
 
 ## Package Sources
 
-Pi accepts three source types in settings and `pi install`.
+Pi accepts four source types in settings and `pi install`.
 
 ### npm
 
@@ -63,6 +64,24 @@ Example:
   "npmCommand": ["mise", "exec", "node@20", "--", "npm"]
 }
 ```
+
+### local
+
+```
+local:/absolute/path/to/package.tgz
+local:./relative/path/to/package.tgz
+local:../relative/path/to/package
+```
+
+`local:` installs a local npm package into pi's managed package directories, just like an `npm:` package install but using a local tarball or package directory as the source.
+
+- Works with packed tarballs from `npm pack` and with local package directories.
+- Relative paths are resolved against the settings file they appear in.
+- Installed under `~/.pi/agent/local/` (global) or `.pi/local/` (project).
+- Runs `npm install <path> --prefix <managed-dir>` so bundled dependencies and manifest-defined pi resources are available.
+- `pi update` reinstalls the package from the same local path.
+
+Use this when you want npm-style managed installs from a local package artifact. For direct no-copy loading from disk, use bare local paths instead.
 
 ### git
 
@@ -216,3 +235,4 @@ Packages can appear in both global and project settings. If the same package app
 - npm: package name
 - git: repository URL without ref
 - local: resolved absolute path
+- local package (`local:`): resolved absolute source path
