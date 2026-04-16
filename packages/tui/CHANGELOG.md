@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.67.6] - 2026-04-16
+
+### Added
+
+- Added OSC 8 hyperlink rendering for markdown links when the terminal advertises support. Introduces a public `hyperlink(text, url)` helper and a `setCapabilities()` test override in `packages/tui` ([#3248](https://github.com/badlogic/pi-mono/pull/3248) by [@ofa1](https://github.com/ofa1)).
+- Added `argumentHint` to `SlashCommand` interface, displayed before the description in the autocomplete dropdown ([#2780](https://github.com/badlogic/pi-mono/pull/2780) by [@andresvi94](https://github.com/andresvi94))
+
+### Changed
+
+- Tightened `detectCapabilities()` to default `hyperlinks: false` for unknown terminals and to force `hyperlinks: false` under tmux/screen (including nested sessions where the outer terminal would otherwise advertise OSC 8). Prevents markdown link URLs from disappearing on terminals that silently swallow OSC 8 sequences ([#3248](https://github.com/badlogic/pi-mono/pull/3248)).
+
 ## [0.67.5] - 2026-04-16
 
 ### Fixed
