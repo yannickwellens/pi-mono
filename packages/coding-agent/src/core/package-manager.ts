@@ -103,12 +103,7 @@ type LocalSource = {
 	path: string;
 };
 
-type LocalPackageSource = {
-	type: "local-package";
-	path: string;
-};
-
-type ParsedSource = NpmSource | GitSource | LocalSource | LocalPackageSource;
+type ParsedSource = NpmSource | GitSource | LocalSource;
 
 interface PiManifest {
 	extensions?: string[];
@@ -782,9 +777,6 @@ export class DefaultPackageManager implements PackageManager {
 			const path = this.resolvePathFromBase(parsed.path, baseDir);
 			return existsSync(path) ? path : undefined;
 		}
-		if (parsed.type === "local-package") {
-			return this.getInstalledLocalPackagePath(parsed, scope);
-		}
 		return undefined;
 	}
 
@@ -914,10 +906,6 @@ export class DefaultPackageManager implements PackageManager {
 				await this.installGit(parsed, scope);
 				return;
 			}
-			if (parsed.type === "local-package") {
-				await this.installLocalPackage(parsed, scope, { fromInput: true });
-				return;
-			}
 			if (parsed.type === "local") {
 				const resolved = this.resolvePath(parsed.path);
 				if (!existsSync(resolved)) {
@@ -944,10 +932,6 @@ export class DefaultPackageManager implements PackageManager {
 			}
 			if (parsed.type === "git") {
 				await this.removeGit(parsed, scope);
-				return;
-			}
-			if (parsed.type === "local-package") {
-				this.removeLocalPackage(parsed, scope, { fromInput: true });
 				return;
 			}
 			if (parsed.type === "local") {
@@ -1017,11 +1001,6 @@ export class DefaultPackageManager implements PackageManager {
 			});
 			return;
 		}
-		if (parsed.type === "local-package") {
-			await this.withProgress("update", source, `Updating ${source}...`, async () => {
-				await this.installLocalPackage(parsed, scope);
-			});
-		}
 	}
 
 	async checkForAvailableUpdates(): Promise<PackageUpdate[]> {
@@ -1048,7 +1027,7 @@ export class DefaultPackageManager implements PackageManager {
 			.map((entry) => async (): Promise<PackageUpdate | undefined> => {
 				const source = typeof entry.pkg === "string" ? entry.pkg : entry.pkg.source;
 				const parsed = this.parseSource(source);
-				if (parsed.type === "local" || parsed.type === "local-package" || parsed.pinned) {
+				if (parsed.type === "local" || parsed.pinned) {
 					return undefined;
 				}
 
@@ -1121,21 +1100,6 @@ export class DefaultPackageManager implements PackageManager {
 				return true;
 			};
 
-			if (parsed.type === "local-package") {
-				const installedPath = this.getInstalledLocalPackagePath(parsed, scope);
-				if (!installedPath) {
-					const installed = await installMissing();
-					if (!installed) continue;
-				}
-				const resolvedInstalledPath = this.getInstalledLocalPackagePath(parsed, scope);
-				if (!resolvedInstalledPath) {
-					continue;
-				}
-				metadata.baseDir = resolvedInstalledPath;
-				this.collectPackageResources(resolvedInstalledPath, accumulator, filter, metadata);
-				continue;
-			}
-
 			if (parsed.type === "npm") {
 				const installedPath = this.getNpmInstallPath(parsed, scope);
 				const needsInstall =
@@ -1204,9 +1168,6 @@ export class DefaultPackageManager implements PackageManager {
 			await this.installGit(parsed, scope);
 			return;
 		}
-		if (parsed.type === "local-package") {
-			await this.installLocalPackage(parsed, scope);
-		}
 	}
 
 	private getPackageSourceString(pkg: PackageSource): string {
@@ -1221,9 +1182,6 @@ export class DefaultPackageManager implements PackageManager {
 		if (parsed.type === "git") {
 			return `git:${parsed.host}/${parsed.path}`;
 		}
-		if (parsed.type === "local-package") {
-			return `local-package:${this.resolvePath(parsed.path)}`;
-		}
 		return `local:${this.resolvePath(parsed.path)}`;
 	}
 
@@ -1236,9 +1194,6 @@ export class DefaultPackageManager implements PackageManager {
 			return `git:${parsed.host}/${parsed.path}`;
 		}
 		const baseDir = this.getBaseDirForScope(scope);
-		if (parsed.type === "local-package") {
-			return `local-package:${this.resolvePathFromBase(parsed.path, baseDir)}`;
-		}
 		return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
 	}
 
@@ -1283,16 +1238,13 @@ export class DefaultPackageManager implements PackageManager {
 
 	private normalizePackageSourceForSettings(source: string, scope: SourceScope): string {
 		const parsed = this.parseSource(source);
-		if (parsed.type !== "local" && parsed.type !== "local-package") {
+		if (parsed.type !== "local") {
 			return source;
 		}
 		const baseDir = this.getBaseDirForScope(scope);
 		const resolved = this.resolvePath(parsed.path);
-		const rel = relative(baseDir, resolved) || ".";
-		if (parsed.type === "local-package") {
-			return `local:${rel}`;
-		}
-		return rel;
+		const rel = relative(baseDir, resolved);
+		return rel || ".";
 	}
 
 	private parseSource(source: string): ParsedSource {
@@ -1305,11 +1257,6 @@ export class DefaultPackageManager implements PackageManager {
 				name,
 				pinned: Boolean(version),
 			};
-		}
-
-		if (source.startsWith("local:")) {
-			const path = source.slice("local:".length).trim();
-			return { type: "local-package", path };
 		}
 
 		if (isLocalPath(source)) {
@@ -1370,12 +1317,15 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private async getLatestNpmVersion(packageName: string): Promise<string> {
-		const response = await fetch(`https://registry.npmjs.org/${packageName}/latest`, {
-			signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
-		});
-		if (!response.ok) throw new Error(`Failed to fetch npm registry: ${response.status}`);
-		const data = (await response.json()) as { version: string };
-		return data.version;
+		const npmCommand = this.getNpmCommand();
+		const stdout = await this.runCommandCapture(
+			npmCommand.command,
+			[...npmCommand.args, "view", packageName, "version", "--json"],
+			{ cwd: this.cwd, timeoutMs: NETWORK_TIMEOUT_MS },
+		);
+		const raw = stdout.trim();
+		if (!raw) throw new Error("Empty response from npm view");
+		return JSON.parse(raw);
 	}
 
 	private async gitHasAvailableUpdate(installedPath: string): Promise<boolean> {
@@ -1542,13 +1492,6 @@ export class DefaultPackageManager implements PackageManager {
 			// Use host/path for identity to normalize SSH and HTTPS
 			return `git:${parsed.host}/${parsed.path}`;
 		}
-		if (parsed.type === "local-package") {
-			if (scope) {
-				const baseDir = this.getBaseDirForScope(scope);
-				return `local-package:${this.resolvePathFromBase(parsed.path, baseDir)}`;
-			}
-			return `local-package:${this.resolvePath(parsed.path)}`;
-		}
 		if (scope) {
 			const baseDir = this.getBaseDirForScope(scope);
 			return `local:${this.resolvePathFromBase(parsed.path, baseDir)}`;
@@ -1623,79 +1566,6 @@ export class DefaultPackageManager implements PackageManager {
 		const installRoot = this.getNpmInstallRoot(scope, temporary);
 		this.ensureNpmProject(installRoot);
 		await this.runNpmCommand(["install", source.spec, "--prefix", installRoot]);
-	}
-
-	private async installLocalPackage(
-		source: LocalPackageSource,
-		scope: SourceScope,
-		options?: { fromInput?: boolean },
-	): Promise<void> {
-		const resolvedPath = this.getResolvedLocalPackageSourcePath(source, scope, options);
-		if (!existsSync(resolvedPath)) {
-			throw new Error(`Path does not exist: ${resolvedPath}`);
-		}
-		const installRoot = this.getLocalPackageInstallRootFromResolvedPath(resolvedPath, scope);
-		rmSync(installRoot, { recursive: true, force: true });
-		this.ensureNpmProject(installRoot);
-		await this.runNpmCommand(["install", resolvedPath, "--prefix", installRoot]);
-	}
-
-	private removeLocalPackage(source: LocalPackageSource, scope: SourceScope, options?: { fromInput?: boolean }): void {
-		const resolvedPath = this.getResolvedLocalPackageSourcePath(source, scope, options);
-		const installRoot = this.getLocalPackageInstallRootFromResolvedPath(resolvedPath, scope);
-		rmSync(installRoot, { recursive: true, force: true });
-	}
-
-	private getResolvedLocalPackageSourcePath(
-		source: LocalPackageSource,
-		scope: SourceScope,
-		options?: { fromInput?: boolean },
-	): string {
-		if (options?.fromInput) {
-			return this.resolvePath(source.path);
-		}
-		const baseDir = this.getBaseDirForScope(scope);
-		return this.resolvePathFromBase(source.path, baseDir);
-	}
-
-	private getLocalPackageInstallRootFromResolvedPath(resolvedPath: string, scope: SourceScope): string {
-		const hash = createHash("sha256").update(resolvedPath).digest("hex").slice(0, 8);
-		if (scope === "temporary") {
-			return join(this.getTemporaryDir("local-package"), hash);
-		}
-		if (scope === "project") {
-			return join(this.cwd, CONFIG_DIR_NAME, "local", hash);
-		}
-		return join(this.agentDir, "local", hash);
-	}
-
-	private getInstalledLocalPackageName(installRoot: string): string | undefined {
-		const packageJsonPath = join(installRoot, "package.json");
-		if (!existsSync(packageJsonPath)) {
-			return undefined;
-		}
-		try {
-			const content = readFileSync(packageJsonPath, "utf-8");
-			const pkg = JSON.parse(content) as { dependencies?: Record<string, string> };
-			const dependencyNames = Object.keys(pkg.dependencies ?? {});
-			if (dependencyNames.length !== 1) {
-				return undefined;
-			}
-			return dependencyNames[0];
-		} catch {
-			return undefined;
-		}
-	}
-
-	private getInstalledLocalPackagePath(source: LocalPackageSource, scope: SourceScope): string | undefined {
-		const resolvedPath = this.getResolvedLocalPackageSourcePath(source, scope);
-		const installRoot = this.getLocalPackageInstallRootFromResolvedPath(resolvedPath, scope);
-		const packageName = this.getInstalledLocalPackageName(installRoot);
-		if (!packageName) {
-			return undefined;
-		}
-		const installedPath = join(installRoot, "node_modules", packageName);
-		return existsSync(installedPath) ? installedPath : undefined;
 	}
 
 	private async uninstallNpm(source: NpmSource, scope: SourceScope): Promise<void> {

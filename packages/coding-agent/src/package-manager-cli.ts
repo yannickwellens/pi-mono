@@ -54,7 +54,6 @@ Examples:
   ${APP_NAME} install git:git@github.com:user/repo
   ${APP_NAME} install https://github.com/user/repo
   ${APP_NAME} install ssh://git@github.com/user/repo
-  ${APP_NAME} install local:./dist/my-package-1.0.0.tgz
   ${APP_NAME} install ./local/path
 `);
 			return;

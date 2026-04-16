@@ -168,6 +168,13 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			const command = new ConverseStreamCommand(commandInput);
 
 			const response = await client.send(command, { abortSignal: options.signal });
+			if (response.$metadata.httpStatusCode !== undefined) {
+				const responseHeaders: Record<string, string> = {};
+				if (response.$metadata.requestId) {
+					responseHeaders["x-amzn-requestid"] = response.$metadata.requestId;
+				}
+				await options?.onResponse?.({ status: response.$metadata.httpStatusCode, headers: responseHeaders }, model);
+			}
 
 			for await (const item of response.stream!) {
 				if (item.messageStart) {
@@ -211,6 +218,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 		} catch (error) {
 			for (const block of output.content) {
 				delete (block as Block).index;
+				// partialJson is only a streaming scratch buffer; never persist it.
 				delete (block as Block).partialJson;
 			}
 			output.stopReason = options.signal?.aborted ? "aborted" : "error";
@@ -413,6 +421,8 @@ function handleContentBlockStop(
 			break;
 		case "toolCall":
 			block.arguments = parseStreamingJson(block.partialJson);
+			// Finalize in-place and strip the scratch buffer so replay only
+			// carries parsed arguments.
 			delete (block as Block).partialJson;
 			stream.push({ type: "toolcall_end", contentIndex: index, toolCall: block, partial: output });
 			break;
@@ -420,12 +430,14 @@ function handleContentBlockStop(
 }
 
 /**
- * Check if the model supports adaptive thinking (Opus 4.6 and Sonnet 4.6).
+ * Check if the model supports adaptive thinking (Opus 4.6+, Sonnet 4.6).
  */
 function supportsAdaptiveThinking(modelId: string): boolean {
 	return (
 		modelId.includes("opus-4-6") ||
 		modelId.includes("opus-4.6") ||
+		modelId.includes("opus-4-7") ||
+		modelId.includes("opus-4.7") ||
 		modelId.includes("sonnet-4-6") ||
 		modelId.includes("sonnet-4.6")
 	);
@@ -434,7 +446,7 @@ function supportsAdaptiveThinking(modelId: string): boolean {
 function mapThinkingLevelToEffort(
 	level: SimpleStreamOptions["reasoning"],
 	modelId: string,
-): "low" | "medium" | "high" | "max" {
+): "low" | "medium" | "high" | "xhigh" | "max" {
 	switch (level) {
 		case "minimal":
 		case "low":
@@ -444,7 +456,13 @@ function mapThinkingLevelToEffort(
 		case "high":
 			return "high";
 		case "xhigh":
-			return modelId.includes("opus-4-6") || modelId.includes("opus-4.6") ? "max" : "high";
+			if (modelId.includes("opus-4-6") || modelId.includes("opus-4.6")) {
+				return "max";
+			}
+			if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7")) {
+				return "xhigh";
+			}
+			return "high";
 		default:
 			return "high";
 	}

@@ -1,5 +1,5 @@
 /**
- * Returns true if the value is NOT a package source (npm:, git:, local:, etc.)
+ * Returns true if the value is NOT a package source (npm:, git:, etc.)
  * or a URL protocol. Bare names and relative paths without ./ prefix
  * are considered local.
  */
@@ -9,7 +9,6 @@ export function isLocalPath(value: string): boolean {
 	if (
 		trimmed.startsWith("npm:") ||
 		trimmed.startsWith("git:") ||
-		trimmed.startsWith("local:") ||
 		trimmed.startsWith("github:") ||
 		trimmed.startsWith("http:") ||
 		trimmed.startsWith("https:") ||
