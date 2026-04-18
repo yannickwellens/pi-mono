@@ -19,7 +19,6 @@
 
 ## Commands
 
-- Preserve the Claude OAuth fix in `packages/ai/src/providers/anthropic.ts`: OAuth requests must keep the Claude Code attribution header and inject pi's system prompt into the first user message as `<system-reminder>` content, not as a separate system block.
 - After code changes (not documentation changes): `npm run check` (get full output, no tail). Fix all errors, warnings, and infos before committing.
 - Note: `npm run check` does not run tests.
 - NEVER run: `npm run dev`, `npm run build`, `npm test`
