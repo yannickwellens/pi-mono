@@ -64,43 +64,7 @@ function getCacheControl(
 }
 
 // Stealth mode: Mimic Claude Code's tool naming exactly
-const claudeCodeVersion = "2.1.101";
-
-/**
- * Build the attribution/billing header that Claude Code sends as the first
- * system prompt block. This header tells Anthropic to bill the request
- * against the user's subscription quota instead of extra-usage credits.
- */
-const ATTRIBUTION_SALT = "59cf53e54c78";
-
-function buildAttributionHeader(messages: Message[]): string {
-	// Extract the first user message text (same logic as Claude Code's haY/QsK)
-	const firstUserMsg = messages.find((m) => m.role === "user");
-	let firstText = "";
-	if (firstUserMsg) {
-		if (typeof firstUserMsg.content === "string") {
-			firstText = firstUserMsg.content;
-		} else if (Array.isArray(firstUserMsg.content)) {
-			const textBlock = firstUserMsg.content.find((b) => b.type === "text");
-			if (textBlock && "text" in textBlock) {
-				firstText = textBlock.text;
-			}
-		}
-	}
-
-	// Hash: sha256(salt + msg[4] + msg[7] + msg[20] + version).hex().slice(0, 3)
-	// buildParams is synchronous so we use a simple hash that produces a
-	// deterministic 3-char hex string from the same inputs.
-	const chars = [4, 7, 20].map((i) => (i < firstText.length ? firstText[i] : "0")).join("");
-	const raw = ATTRIBUTION_SALT + chars + claudeCodeVersion;
-	let h = 0;
-	for (let i = 0; i < raw.length; i++) {
-		h = (Math.imul(31, h) + raw.charCodeAt(i)) | 0;
-	}
-	const hash = ((h >>> 0) % 0xfff).toString(16).padStart(3, "0");
-
-	return `x-anthropic-billing-header: cc_version=${claudeCodeVersion}.${hash}; cc_entrypoint=cli; cch=00000;`;
-}
+const claudeCodeVersion = "2.1.75";
 
 // Claude Code 2.x tool names (canonical casing)
 // Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
@@ -688,39 +652,21 @@ function buildParams(
 		stream: true,
 	};
 
-	// For OAuth tokens, we MUST include Claude Code identity and attribution header.
-	// The server validates system prompt content matches Claude Code's expected structure.
-	// Custom instructions (pi's system prompt) go into the first user message as
-	// <system-reminder> tags, same pattern Claude Code uses for CLAUDE.md content.
+	// For OAuth tokens, we MUST include Claude Code identity
 	if (isOAuthToken) {
 		params.system = [
-			{
-				type: "text",
-				text: buildAttributionHeader(context.messages),
-			},
 			{
 				type: "text",
 				text: "You are Claude Code, Anthropic's official CLI for Claude.",
 				...(cacheControl ? { cache_control: cacheControl } : {}),
 			},
 		];
-		// Inject custom system prompt into first user message as <system-reminder>
-		if (context.systemPrompt && params.messages.length > 0) {
-			const reminder = `<system-reminder>\n${sanitizeSurrogates(context.systemPrompt)}\n</system-reminder>\n\n`;
-			const firstMsg = params.messages[0];
-			if (firstMsg.role === "user") {
-				if (typeof firstMsg.content === "string") {
-					params.messages[0] = { ...firstMsg, content: reminder + firstMsg.content };
-				} else if (Array.isArray(firstMsg.content)) {
-					params.messages[0] = {
-						...firstMsg,
-						content: [{ type: "text", text: reminder }, ...firstMsg.content],
-					};
-				}
-			} else {
-				// First message isn't user — prepend a user message with the reminder
-				params.messages.unshift({ role: "user", content: reminder });
-			}
+		if (context.systemPrompt) {
+			params.system.push({
+				type: "text",
+				text: sanitizeSurrogates(context.systemPrompt),
+				...(cacheControl ? { cache_control: cacheControl } : {}),
+			});
 		}
 	} else if (context.systemPrompt) {
 		// Add cache control to system prompt for non-OAuth tokens
